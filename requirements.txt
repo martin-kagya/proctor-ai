@@ -201,6 +201,7 @@ sentencepiece==0.2.0
 sentry-sdk==2.33.1
 setuptools==75.8.0
 shapely==2.1.2
+silero-vad==6.2.1
 simsimd==6.2.1
 six==1.17.0
 smmap==5.0.2
@@ -218,6 +219,7 @@ tensorboard-data-server==0.7.2
 threadpoolctl==3.6.0
 tokenizers==0.21.2
 torch==2.2.0
+torchaudio==2.11.0
 torchvision==0.17.0
 tqdm @ file:///home/conda/feedstock_root/build_artifacts/tqdm_1735661334605/work
 transformers==4.53.2

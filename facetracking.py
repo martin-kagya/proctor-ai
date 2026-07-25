@@ -30,6 +30,8 @@ import mediapipe as mp
 import numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+from events import EventConfig, EventDetector
+
 
 # ---------------------------------------------------------------------------
 # Model asset -- auto-downloaded if absent
@@ -210,87 +212,6 @@ class HeadPoseEstimator:
 
 
 # ---------------------------------------------------------------------------
-# Proctoring event detector
-# ---------------------------------------------------------------------------
-
-@dataclass
-class EventConfig:
-    yaw_threshold_deg:         float = 25.0
-    pitch_threshold_deg:       float = 20.0
-    sustained_seconds:         float = 2.5
-    frequency_window_seconds:  float = 300.0
-    frequency_threshold_count: int   = 6
-    gaze_only_threshold:       float = 0.5   # normalized offset
-    gaze_head_still_yaw_deg:   float = 8.0   # "head still" below this yaw
-
-
-class EventDetector:
-    """
-    Converts smoothed PoseResult values → discrete proctoring events.
-    Feed the events into a risk-scoring layer; don't auto-flag on any
-    single event in isolation.
-    """
-
-    def __init__(self, config: Optional[EventConfig] = None):
-        self.cfg = config or EventConfig()
-        self._away_start: Optional[float] = None
-        self._recent: deque[float] = deque()
-
-    def update(self, pose: PoseResult, ts: float) -> list[dict]:
-        events: list[dict] = []
-
-        if not pose.face_found:
-            self._away_start = None
-            return events
-
-        turned = (abs(pose.yaw)   > self.cfg.yaw_threshold_deg or
-                  abs(pose.pitch) > self.cfg.pitch_threshold_deg)
-
-        # --- Sustained look-away ---
-        if turned:
-            if self._away_start is None:
-                self._away_start = ts
-            elif ts - self._away_start >= self.cfg.sustained_seconds:
-                events.append({
-                    "type":  "sustained_look_away",
-                    "ts":    ts,
-                    "yaw":   pose.yaw,
-                    "pitch": pose.pitch,
-                })
-                self._recent.append(ts)
-                self._away_start = None   # reset; can re-trigger if it continues
-        else:
-            self._away_start = None
-
-        # --- Frequency flag (rolling window) ---
-        cutoff = ts - self.cfg.frequency_window_seconds
-        while self._recent and self._recent[0] < cutoff:
-            self._recent.popleft()
-        if len(self._recent) >= self.cfg.frequency_threshold_count:
-            events.append({
-                "type":  "frequent_look_away",
-                "ts":    ts,
-                "count": len(self._recent),
-            })
-            self._recent.clear()   # avoid re-firing every frame
-
-        # --- Gaze without head movement ---
-        # Catches "eyes dropped to phone/notes" without turning the head.
-        head_still = abs(pose.yaw) < self.cfg.gaze_head_still_yaw_deg
-        gaze_off   = (abs(pose.gaze_x) > self.cfg.gaze_only_threshold or
-                      abs(pose.gaze_y) > self.cfg.gaze_only_threshold)
-        if head_still and gaze_off:
-            events.append({
-                "type":   "gaze_without_head_movement",
-                "ts":     ts,
-                "gaze_x": pose.gaze_x,
-                "gaze_y": pose.gaze_y,
-            })
-
-        return events
-
-
-# ---------------------------------------------------------------------------
 # Overlay rendering
 # ---------------------------------------------------------------------------
 
@@ -301,13 +222,18 @@ _FLAG_LABELS = {
     "sustained_look_away":        "Sustained look-away",
     "frequent_look_away":         "Frequent look-aways",
     "gaze_without_head_movement": "Gaze shift (head still)",
+    "voice_detected":             "Voice detected",
+    "sustained_speaking":         "Sustained speaking",
 }
 # BGR
 _FLAG_COLORS = {
     "sustained_look_away":        (0,  60, 235),
     "frequent_look_away":         (0,  20, 200),
     "gaze_without_head_movement": (0, 130, 235),
+    "voice_detected":             (0, 165, 255),
+    "sustained_speaking":         (0, 100, 255),
 }
+
 
 
 def draw_overlay(frame: np.ndarray, pose: PoseResult,
