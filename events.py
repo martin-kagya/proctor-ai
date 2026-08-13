@@ -6,6 +6,7 @@ Provides an extensible EventDetector pipeline that combines multiple sub-detecto
 into a unified event stream.
 """
 
+
 from __future__ import annotations
 
 from collections import deque
@@ -26,9 +27,36 @@ class EventConfig:
     frequency_threshold_count: int = 6
     gaze_only_threshold: float = 0.5
     gaze_head_still_yaw_deg: float = 8.0
+    isCellphone_usage_seconds: float = 3.0
 
     # Voice Activity Thresholds
     speaking_sustained_seconds: float = 2.0
+
+
+
+# ---------------------------------------------------------------------------
+# Event metadata & rendering constants (labels & colors)
+# ---------------------------------------------------------------------------
+FLAG_LABELS: Dict[str, str] = {
+    "sustained_look_away":        "Sustained look-away",
+    "frequent_look_away":         "Frequent look-aways",
+    "gaze_without_head_movement": "Gaze shift (head still)",
+    "voice_detected":             "Voice detected",
+    "sustained_speaking":         "Sustained speaking",
+    "cellphone_detected":         "Cellphone detected",
+    "sustained_cellphone_usage":  "Sustained cellphone usage",
+}
+
+# Colors in BGR format for OpenCV overlay rendering
+FLAG_COLORS: Dict[str, tuple[int, int, int]] = {
+    "sustained_look_away":        (0,  60, 235),
+    "frequent_look_away":         (0,  20, 200),
+    "gaze_without_head_movement": (0, 130, 235),
+    "voice_detected":             (0, 165, 255),
+    "sustained_speaking":         (0, 100, 255),
+    "cellphone_detected":         (0,   0, 255),
+    "sustained_cellphone_usage":  (0,   0, 200),
+}
 
 
 class BaseSubDetector:
@@ -155,6 +183,43 @@ class VoiceActivitySubDetector(BaseSubDetector):
         return events
 
 
+class CellphoneSubDetector(BaseSubDetector):
+    """Detects cellphone presence and sustained usage."""
+
+    def __init__(self, config: EventConfig):
+        self.cfg = config
+        self._phone_start: Optional[float] = None
+
+    def update(
+        self, pose: Optional[PoseResult], state: Optional[Dict[str, Any]], ts: float
+    ) -> List[Dict[str, Any]]:
+        events: List[Dict[str, Any]] = []
+
+        if state is None:
+            return events
+
+        is_phone_detected = state.get("isCellphone_detected", False)
+
+        if is_phone_detected:
+            events.append({"type": "cellphone_detected", "ts": ts})
+
+            if self._phone_start is None:
+                self._phone_start = ts
+            elif ts - self._phone_start >= self.cfg.isCellphone_usage_seconds:
+                events.append(
+                    {
+                        "type": "sustained_cellphone_usage",
+                        "ts": ts,
+                        "duration": ts - self._phone_start,
+                    }
+                )
+                self._phone_start = None
+        else:
+            self._phone_start = None
+
+        return events
+
+
 class EventDetector:
     """
     Central Event Detector Pipeline.
@@ -167,6 +232,7 @@ class EventDetector:
         self.sub_detectors: List[BaseSubDetector] = [
             HeadPoseSubDetector(self.cfg),
             VoiceActivitySubDetector(self.cfg),
+            CellphoneSubDetector(self.cfg),
         ]
 
     def register_sub_detector(self, detector: BaseSubDetector) -> None:

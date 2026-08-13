@@ -30,7 +30,7 @@ import mediapipe as mp
 import numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
-from events import EventConfig, EventDetector
+from events import EventConfig, EventDetector, FLAG_COLORS, FLAG_LABELS
 
 
 # ---------------------------------------------------------------------------
@@ -218,22 +218,8 @@ class HeadPoseEstimator:
 # How long (seconds) a flag badge stays visible after firing.
 FLAG_TTL = 3.0
 
-_FLAG_LABELS = {
-    "sustained_look_away":        "Sustained look-away",
-    "frequent_look_away":         "Frequent look-aways",
-    "gaze_without_head_movement": "Gaze shift (head still)",
-    "voice_detected":             "Voice detected",
-    "sustained_speaking":         "Sustained speaking",
-}
-# BGR
-_FLAG_COLORS = {
-    "sustained_look_away":        (0,  60, 235),
-    "frequent_look_away":         (0,  20, 200),
-    "gaze_without_head_movement": (0, 130, 235),
-    "voice_detected":             (0, 165, 255),
-    "sustained_speaking":         (0, 100, 255),
-}
-
+_FLAG_LABELS = FLAG_LABELS
+_FLAG_COLORS = FLAG_COLORS
 
 
 def draw_overlay(frame: np.ndarray, pose: PoseResult,
@@ -327,7 +313,7 @@ def draw_overlay(frame: np.ndarray, pose: PoseResult,
             fade  = min((expiry - now) / FLAG_TTL, 1.0)
             base  = _FLAG_COLORS.get(key, (0, 80, 220))
             color = tuple(int(c * (0.35 + 0.65 * fade)) for c in base)
-            label = _FLAG_LABELS.get(key, key)
+            label = _FLAG_LABELS.get(key, key.replace("_", " ").title())
             put(f"  [!] {label}", color, 0.45)
 
     # ── Bottom alert banner (only when flags are live) ────────────────────
@@ -336,11 +322,15 @@ def draw_overlay(frame: np.ndarray, pose: PoseResult,
         banner = frame.copy()
         cv2.rectangle(banner, (0, fh - BANNER_H), (fw, fh), (0, 0, 175), -1)
         cv2.addWeighted(banner, 0.78, frame, 0.22, 0, frame)
+
+        active_labels = ", ".join([_FLAG_LABELS.get(k, k.replace("_", " ").title()) for k in live.keys()])
+        banner_text = f"[!] SUSPICIOUS EVENT: {active_labels}"
+
         cv2.putText(
             frame,
-            "[!] SUSPICIOUS BEHAVIOUR DETECTED",
+            banner_text,
             (PANEL_W + 12, fh - 14),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.60, (255, 255, 255), 2, cv2.LINE_AA,
+            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA,
         )
 
 
